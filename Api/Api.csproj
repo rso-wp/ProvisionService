@@ -9,16 +9,28 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="Google.Protobuf" Version="3.31.1" />
+    <PackageReference Include="Grpc.Net.ClientFactory" Version="2.71.0" />
+    <PackageReference Include="Grpc.Tools" Version="2.72.0">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.13" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.13" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.13">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
     <PackageReference Include="Microsoft.VisualStudio.Azure.Containers.Tools.Targets" Version="1.24.2-preview.1" />
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.3" />
+    <PackageReference Include="WolverineFx" Version="6.50.0" />
+    <PackageReference Include="WolverineFx.EntityFrameworkCore" Version="6.50.0" />
+    <PackageReference Include="WolverineFx.Postgresql" Version="6.50.0" />
+    <PackageReference Include="WolverineFx.RuntimeCompilation" Version="6.50.0" />
   </ItemGroup>
 
   <ItemGroup>
-    <Folder Include="Domain\" />
-    <Folder Include="Features\GetServices\" />
-    <Folder Include="Features\PostProvisions\" />
-    <Folder Include="Infra\" />
-    <Folder Include="Features\GetProvisions\" />
+    <Protobuf Include="Protos\payment.proto" GrpcServices="Client" />
   </ItemGroup>
 
 </Project>
