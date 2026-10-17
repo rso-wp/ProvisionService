@@ -70,7 +70,9 @@ public static partial class PostProvisionsEndpoint
 
                 if (subscription.Status != SubscriptionSuccessful)
                     return Results.Problem(
-                        $"Subscription could not be started ({subscription.Status}).",
+                        string.IsNullOrEmpty(subscription.Reason)
+                            ? $"Subscription could not be started ({subscription.Status})."
+                            : subscription.Reason,
                         statusCode: StatusCodes.Status402PaymentRequired);
 
                 var provision = new ProvisionedService

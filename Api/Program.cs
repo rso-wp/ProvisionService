@@ -26,6 +26,7 @@ builder.Services.AddOptions<ProvisioningOptions>()
     .ValidateOnStart();
 builder.Services.AddProvisioningQueue(builder.Configuration);
 builder.Services.AddHostedService<ProvisioningEventsConsumer>();
+builder.Services.AddHostedService<SubscriptionEndedConsumer>();
 
 builder.Host.UseWolverine(opts => opts.AddProvisioningMessaging(builder.Configuration));
 

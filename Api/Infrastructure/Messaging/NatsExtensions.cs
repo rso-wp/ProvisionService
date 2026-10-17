@@ -22,27 +22,34 @@ public static class NatsExtensions
     }
 
     /// <summary>Creates the stream if missing. ProvisionFunction declares the same stream.</summary>
-    public static async Task EnsureProvisioningStreamAsync(this INatsJSContext js, CancellationToken ct)
+    public static Task EnsureProvisioningStreamAsync(this INatsJSContext js, CancellationToken ct) =>
+        js.EnsureStreamAsync(ProvisioningSubjects.Stream, ProvisioningSubjects.All, ct);
+
+    /// <summary>Creates the stream if missing. PaymentService declares the same stream.</summary>
+    public static Task EnsurePaymentsStreamAsync(this INatsJSContext js, CancellationToken ct) =>
+        js.EnsureStreamAsync(PaymentSubjects.Stream, PaymentSubjects.All, ct);
+
+    public static async Task PublishJsonAsync<T>(this INatsJSContext js, string subject, T message, CancellationToken ct)
+    {
+        var ack = await js.PublishAsync(subject, JsonSerializer.SerializeToUtf8Bytes(message, Json), cancellationToken: ct);
+        ack.EnsureSuccess();
+    }
+
+    private static async Task EnsureStreamAsync(this INatsJSContext js, string stream, string subjects, CancellationToken ct)
     {
         try
         {
-            await js.GetStreamAsync(ProvisioningSubjects.Stream, cancellationToken: ct);
+            await js.GetStreamAsync(stream, cancellationToken: ct);
         }
         catch (NatsJSApiException ex) when (ex.Error.Code == 404)
         {
             await js.CreateStreamAsync(
-                new StreamConfig(ProvisioningSubjects.Stream, [ProvisioningSubjects.All])
+                new StreamConfig(stream, [subjects])
                 {
                     Storage = StreamConfigStorage.File,
                     MaxAge = TimeSpan.FromDays(7)
                 },
                 ct);
         }
-    }
-
-    public static async Task PublishJsonAsync<T>(this INatsJSContext js, string subject, T message, CancellationToken ct)
-    {
-        var ack = await js.PublishAsync(subject, JsonSerializer.SerializeToUtf8Bytes(message, Json), cancellationToken: ct);
-        ack.EnsureSuccess();
     }
 }
