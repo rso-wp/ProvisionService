@@ -1,11 +1,6 @@
 @Api_HostAddress = http://localhost:5151
 @Token = REPLACE_WITH_ENTRA_ACCESS_TOKEN
 
-GET {{Api_HostAddress}}/services
-Authorization: Bearer {{Token}}
-
-###
-
 GET {{Api_HostAddress}}/provisions
 Authorization: Bearer {{Token}}
 
@@ -15,6 +10,6 @@ POST {{Api_HostAddress}}/provisions
 Authorization: Bearer {{Token}}
 Content-Type: application/json
 
-{ "serviceId": "postgres", "version": "16" }
+{ "name": "my-site" }
 
 ###

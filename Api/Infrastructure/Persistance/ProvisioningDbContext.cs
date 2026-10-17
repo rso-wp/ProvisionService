@@ -8,8 +8,6 @@ public class ProvisioningDbContext(DbContextOptions<ProvisioningDbContext> optio
 {
     public const string Schema = "provisioning_service";
 
-    public DbSet<Service> Services => Set<Service>();
-    public DbSet<ServiceVersion> ServiceVersions => Set<ServiceVersion>();
     public DbSet<ProvisionedService> ProvisionedServices => Set<ProvisionedService>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)

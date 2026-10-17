@@ -8,7 +8,6 @@ namespace Api.Features.GetProvisions;
 
 public record ProvisionedServiceResponse(
     string Name,
-    string Version,
     ProvisioningStatus ProvisioningStatus,
     DateTime StartDate);
 
@@ -16,7 +15,7 @@ public record UserProvisionsResponse(Guid UserId, List<ProvisionedServiceRespons
 
 public static class GetProvisionsEndpoint
 {
-    /// <summary>GET /provisions. The calling user's provisioned services.</summary>
+    /// <summary>GET /provisions. The calling user's WordPress sites.</summary>
     public static IEndpointRouteBuilder MapGetProvisions(this IEndpointRouteBuilder app)
     {
         app.MapGet("/provisions", async (ClaimsPrincipal user, ProvisioningDbContext db, CancellationToken ct) =>
@@ -27,8 +26,7 @@ public static class GetProvisionsEndpoint
                     .AsNoTracking()
                     .Where(p => p.UserId == userId)
                     .OrderByDescending(p => p.StartDate)
-                    .Select(p => new ProvisionedServiceResponse(
-                        p.ServiceName, p.ServiceVersion, p.ProvisioningStatus, p.StartDate))
+                    .Select(p => new ProvisionedServiceResponse(p.Name, p.ProvisioningStatus, p.StartDate))
                     .ToListAsync(ct);
 
                 return Results.Ok(new UserProvisionsResponse(userId, services));

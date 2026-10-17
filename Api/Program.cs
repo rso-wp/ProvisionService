@@ -1,6 +1,5 @@
 using System.Text.Json.Serialization;
 using Api.Features.GetProvisions;
-using Api.Features.GetServices;
 using Api.Features.PostProvisions;
 using Api.Infrastructure.Auth;
 using Api.Infrastructure.CloudFunction;
@@ -19,6 +18,10 @@ builder.Services.ConfigureHttpJsonOptions(o => o.SerializerOptions.Converters.Ad
 builder.Services.AddGrpcClient<Payment.PaymentClient>(o =>
     o.Address = new Uri(builder.Configuration["PaymentService:GrpcUrl"]
         ?? throw new InvalidOperationException("'PaymentService:GrpcUrl' is not configured.")));
+builder.Services.AddOptions<ProvisioningOptions>()
+    .Bind(builder.Configuration.GetSection(ProvisioningOptions.SectionName))
+    .ValidateDataAnnotations()
+    .ValidateOnStart();
 builder.Services.AddScoped<ICloudFunctionTrigger, CloudFunctionTrigger>();
 
 builder.Host.UseWolverine(opts => opts.AddProvisioningMessaging(builder.Configuration));
@@ -32,13 +35,11 @@ if (app.Environment.IsDevelopment())
     using var scope = app.Services.CreateScope();
     var db = scope.ServiceProvider.GetRequiredService<ProvisioningDbContext>();
     await db.Database.MigrateAsync();
-    await DevSeed.SeedAsync(db);
 }
 
 app.UseAuthentication();
 app.UseAuthorization();
 
-app.MapGetServices();
 app.MapGetProvisions();
 app.MapPostProvisions();
 
