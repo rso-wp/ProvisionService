@@ -1,8 +1,10 @@
 using System.Text.Json.Serialization;
+using Api.Features.DeleteProvisions;
 using Api.Features.GetProvisions;
 using Api.Features.PostProvisions;
 using Api.Infrastructure.Auth;
-using Api.Infrastructure.CloudFunction;
+using Api.Infrastructure.Messaging;
+using Api.Features.ProvisioningEvents;
 using Api.Infrastructure.Persistance;
 using Api.Protos;
 using Microsoft.EntityFrameworkCore;
@@ -11,7 +13,7 @@ using Wolverine;
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddProvisioningPersistence(builder.Configuration);
-builder.Services.AddEntraAuth(builder.Configuration);
+builder.Services.AddEntraAuth(builder.Configuration, builder.Environment);
 builder.Services.AddOpenApi();
 builder.Services.ConfigureHttpJsonOptions(o => o.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 
@@ -22,7 +24,8 @@ builder.Services.AddOptions<ProvisioningOptions>()
     .Bind(builder.Configuration.GetSection(ProvisioningOptions.SectionName))
     .ValidateDataAnnotations()
     .ValidateOnStart();
-builder.Services.AddScoped<ICloudFunctionTrigger, CloudFunctionTrigger>();
+builder.Services.AddProvisioningQueue(builder.Configuration);
+builder.Services.AddHostedService<ProvisioningEventsConsumer>();
 
 builder.Host.UseWolverine(opts => opts.AddProvisioningMessaging(builder.Configuration));
 
@@ -42,5 +45,6 @@ app.UseAuthorization();
 
 app.MapGetProvisions();
 app.MapPostProvisions();
+app.MapDeleteProvisions();
 
 await app.RunAsync();

@@ -9,7 +9,8 @@ namespace Api.Features.GetProvisions;
 public record ProvisionedServiceResponse(
     string Name,
     ProvisioningStatus ProvisioningStatus,
-    DateTime StartDate);
+    DateTime StartDate,
+    string? Url);
 
 public record UserProvisionsResponse(Guid UserId, List<ProvisionedServiceResponse> Services);
 
@@ -26,7 +27,7 @@ public static class GetProvisionsEndpoint
                     .AsNoTracking()
                     .Where(p => p.UserId == userId)
                     .OrderByDescending(p => p.StartDate)
-                    .Select(p => new ProvisionedServiceResponse(p.Name, p.ProvisioningStatus, p.StartDate))
+                    .Select(p => new ProvisionedServiceResponse(p.Name, p.ProvisioningStatus, p.StartDate, p.Url))
                     .ToListAsync(ct);
 
                 return Results.Ok(new UserProvisionsResponse(userId, services));

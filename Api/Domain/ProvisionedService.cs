@@ -9,5 +9,7 @@ public class ProvisionedService
     public required string Name { get; set; }
     public required string StripeSubscriptionId { get; set; }
     public ProvisioningStatus ProvisioningStatus { get; set; }
+    /// <summary>Where the site is reachable; set when ProvisionFunction reports it running.</summary>
+    public string? Url { get; set; }
     public DateTime StartDate { get; set; }
 }

@@ -1,0 +1,31 @@
+namespace Api.Infrastructure.Messaging;
+
+// Wire contract shared with ProvisionFunction (copy in ProvisionFunction/Function/Contracts).
+// Keep both copies in sync. Payloads are JSON (camelCase) on NATS JetStream stream PROVISIONING.
+
+public static class ProvisioningSubjects
+{
+    public const string Stream = "PROVISIONING";
+    public const string All = "provisioning.>";
+
+    // ProvisioningService -> ProvisionFunction
+    public const string Commands = "provisioning.commands.>";
+    public const string Provision = "provisioning.commands.provision";
+    public const string Deprovision = "provisioning.commands.deprovision";
+
+    // ProvisionFunction -> ProvisioningService
+    public const string Events = "provisioning.events.>";
+    public const string Provisioned = "provisioning.events.provisioned";
+    public const string ProvisioningFailed = "provisioning.events.provisioning-failed";
+    public const string Destroyed = "provisioning.events.destroyed";
+}
+
+public record ProvisionTenantSite(Guid ProvisionId, string Name);
+
+public record DeprovisionTenantSite(Guid ProvisionId, string Name);
+
+public record TenantSiteProvisioned(Guid ProvisionId, string Url);
+
+public record TenantSiteProvisioningFailed(Guid ProvisionId, string Reason);
+
+public record TenantSiteDestroyed(Guid ProvisionId);

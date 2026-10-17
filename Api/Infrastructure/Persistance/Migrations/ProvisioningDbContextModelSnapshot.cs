@@ -48,6 +48,10 @@ namespace Api.Infrastructure.Persistance.Migrations
                         .HasMaxLength(255)
                         .HasColumnType("character varying(255)");
 
+                    b.Property<string>("Url")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
                     b.Property<Guid>("UserId")
                         .HasColumnType("uuid");
 

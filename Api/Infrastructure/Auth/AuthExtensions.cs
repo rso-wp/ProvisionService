@@ -1,12 +1,22 @@
 using System.Security.Claims;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 
 namespace Api.Infrastructure.Auth;
 
 public static class AuthExtensions
 {
-    public static IServiceCollection AddEntraAuth(this IServiceCollection services, IConfiguration configuration)
+    public static IServiceCollection AddEntraAuth(
+        this IServiceCollection services, IConfiguration configuration, IHostEnvironment environment)
     {
+        if (environment.IsDevelopment() && configuration.GetValue<bool>("DevAuth:Enabled"))
+        {
+            services.AddAuthentication(DevAuthHandler.SchemeName)
+                .AddScheme<AuthenticationSchemeOptions, DevAuthHandler>(DevAuthHandler.SchemeName, null);
+            services.AddAuthorization();
+            return services;
+        }
+
         var section = configuration.GetSection("EntraId");
 
         services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
