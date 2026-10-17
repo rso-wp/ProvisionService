@@ -12,7 +12,7 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Api.Infrastructure.Persistance.Migrations
 {
     [DbContext(typeof(ProvisioningDbContext))]
-    [Migration("20261017100904_InitialMigration")]
+    [Migration("20261017103443_InitialMigration")]
     partial class InitialMigration
     {
         /// <inheritdoc />
@@ -33,25 +33,15 @@ namespace Api.Infrastructure.Persistance.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(63)
+                        .HasColumnType("character varying(63)");
+
                     b.Property<string>("ProvisioningStatus")
                         .IsRequired()
                         .HasMaxLength(50)
                         .HasColumnType("character varying(50)");
-
-                    b.Property<string>("ServiceId")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.Property<string>("ServiceName")
-                        .IsRequired()
-                        .HasMaxLength(255)
-                        .HasColumnType("character varying(255)");
-
-                    b.Property<string>("ServiceVersion")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
 
                     b.Property<DateTime>("StartDate")
                         .HasColumnType("timestamp with time zone");
@@ -66,7 +56,8 @@ namespace Api.Infrastructure.Persistance.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("ServiceId");
+                    b.HasIndex("Name")
+                        .IsUnique();
 
                     b.HasIndex("StripeSubscriptionId")
                         .IsUnique();
@@ -74,56 +65,6 @@ namespace Api.Infrastructure.Persistance.Migrations
                     b.HasIndex("UserId");
 
                     b.ToTable("ProvisionedServices", "provisioning_service");
-                });
-
-            modelBuilder.Entity("Api.Domain.Service", b =>
-                {
-                    b.Property<string>("Id")
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.Property<string>("DockerImageName")
-                        .IsRequired()
-                        .HasMaxLength(255)
-                        .HasColumnType("character varying(255)");
-
-                    b.Property<string>("StripePriceId")
-                        .IsRequired()
-                        .HasMaxLength(255)
-                        .HasColumnType("character varying(255)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("DockerImageName")
-                        .IsUnique();
-
-                    b.ToTable("Services", "provisioning_service");
-                });
-
-            modelBuilder.Entity("Api.Domain.ServiceVersion", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<string>("ServiceId")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.Property<string>("Version")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ServiceId", "Version")
-                        .IsUnique();
-
-                    b.ToTable("ServiceVersions", "provisioning_service");
                 });
 
             modelBuilder.Entity("Wolverine.EntityFrameworkCore.Internals.IncomingMessage", b =>
@@ -216,29 +157,6 @@ namespace Api.Infrastructure.Persistance.Migrations
                         {
                             t.ExcludeFromMigrations();
                         });
-                });
-
-            modelBuilder.Entity("Api.Domain.ProvisionedService", b =>
-                {
-                    b.HasOne("Api.Domain.Service", null)
-                        .WithMany()
-                        .HasForeignKey("ServiceId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-                });
-
-            modelBuilder.Entity("Api.Domain.ServiceVersion", b =>
-                {
-                    b.HasOne("Api.Domain.Service", null)
-                        .WithMany("Versions")
-                        .HasForeignKey("ServiceId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-                });
-
-            modelBuilder.Entity("Api.Domain.Service", b =>
-                {
-                    b.Navigation("Versions");
                 });
 #pragma warning restore 612, 618
         }

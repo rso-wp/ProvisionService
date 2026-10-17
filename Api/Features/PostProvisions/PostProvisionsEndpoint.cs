@@ -1,21 +1,28 @@
 using System.Security.Claims;
+using System.Text.RegularExpressions;
 using Api.Domain;
 using Api.Infrastructure.Auth;
 using Api.Infrastructure.Persistance;
 using Api.Protos;
 using Grpc.Core;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
+using Npgsql;
 using Wolverine.EntityFrameworkCore;
 
 namespace Api.Features.PostProvisions;
 
-public record ProvisionRequest(string ServiceId, string Version);
+public record ProvisionRequest(string Name);
 
-public record ProvisionResponse(Guid ProvisionId, ProvisioningStatus ProvisioningStatus);
+public record ProvisionResponse(Guid ProvisionId, string Name, ProvisioningStatus ProvisioningStatus);
 
-public static class PostProvisionsEndpoint
+public static partial class PostProvisionsEndpoint
 {
     private const string SubscriptionSuccessful = "SUCCESSFUL";
+
+    // A DNS label: it becomes part of the tenant's host name and helm release name.
+    [GeneratedRegex("^[a-z0-9]([-a-z0-9]{0,28}[a-z0-9])?$")]
+    private static partial Regex TenantName();
 
     /// <summary>
     /// POST /provisions. Asks PaymentService whether the subscription can start, then stores a Queued
@@ -28,33 +35,19 @@ public static class PostProvisionsEndpoint
                 ClaimsPrincipal user,
                 IDbContextOutbox<ProvisioningDbContext> outbox,
                 Payment.PaymentClient payments,
+                IOptions<ProvisioningOptions> options,
                 ILogger<ProvisionRequest> logger,
                 CancellationToken ct) =>
             {
+                if (request.Name is null || !TenantName().IsMatch(request.Name))
+                    return Results.BadRequest(
+                        "Name must be 1-30 characters: lowercase letters, digits and '-', not starting or ending with '-'.");
+
                 var userId = user.GetUserId();
                 var db = outbox.DbContext;
 
-                var service = await db.Services
-                    .AsNoTracking()
-                    .Where(s => s.Id == request.ServiceId)
-                    .Select(s => new
-                    {
-                        s.Id,
-                        s.DockerImageName,
-                        s.StripePriceId,
-                        HasVersion = s.Versions.Any(v => v.Version == request.Version)
-                    })
-                    .SingleOrDefaultAsync(ct);
-
-                if (service is null) return Results.NotFound($"Service '{request.ServiceId}' does not exist.");
-                if (!service.HasVersion)
-                    return Results.NotFound($"Service '{request.ServiceId}' has no version '{request.Version}'.");
-
-                var alreadyProvisioned = await db.ProvisionedServices.AnyAsync(p =>
-                    p.UserId == userId
-                    && p.ServiceId == service.Id
-                    && p.ProvisioningStatus != ProvisioningStatus.Failed, ct);
-                if (alreadyProvisioned) return Results.Conflict("User already has this service.");
+                if (await db.ProvisionedServices.AnyAsync(p => p.Name == request.Name, ct))
+                    return Results.Conflict($"Name '{request.Name}' is taken.");
 
                 TryMakeSubscriptionResponse subscription;
                 try
@@ -63,8 +56,8 @@ public static class PostProvisionsEndpoint
                         new TryMakeSubscriptionRequest
                         {
                             UserId = userId.ToString(),
-                            StripePriceId = service.StripePriceId,
-                            ServiceId = service.Id
+                            StripePriceId = options.Value.StripePriceId,
+                            ServiceId = ProvisioningOptions.ServiceId
                         },
                         cancellationToken: ct);
                 }
@@ -84,9 +77,7 @@ public static class PostProvisionsEndpoint
                 {
                     Id = Guid.NewGuid(),
                     UserId = userId,
-                    ServiceId = service.Id,
-                    ServiceName = service.DockerImageName,
-                    ServiceVersion = request.Version,
+                    Name = request.Name,
                     StripeSubscriptionId = subscription.StripeSubscriptionId,
                     ProvisioningStatus = ProvisioningStatus.Queued,
                     StartDate = DateTime.UtcNow
@@ -94,10 +85,20 @@ public static class PostProvisionsEndpoint
                 db.ProvisionedServices.Add(provision);
 
                 await outbox.PublishAsync(new ProvisionService(provision.Id));
-                await outbox.SaveChangesAndFlushMessagesAsync(ct);
+                try
+                {
+                    await outbox.SaveChangesAndFlushMessagesAsync(ct);
+                }
+                catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
+                {
+                    // Lost a race for the same name after the subscription was already started.
+                    logger.LogError(ex, "Name {Name} taken concurrently; subscription {Subscription} needs cancelling",
+                        request.Name, subscription.StripeSubscriptionId);
+                    return Results.Conflict($"Name '{request.Name}' is taken.");
+                }
 
                 return Results.Accepted($"/provisions/{provision.Id}",
-                    new ProvisionResponse(provision.Id, provision.ProvisioningStatus));
+                    new ProvisionResponse(provision.Id, provision.Name, provision.ProvisioningStatus));
             })
             .RequireAuthorization();
 
