@@ -1,15 +1,18 @@
-using Api.Infrastructure.CloudFunction;
+using Api.Infrastructure.Messaging;
 using Api.Infrastructure.Persistance;
 
 namespace Api.Features.PostProvisions;
 
 public static class ProvisionServiceHandler
 {
-    /// <summary>Picked up by Wolverine from the (durable) queue after the provision row was committed.</summary>
+    /// <summary>
+    /// Picked up by Wolverine from the (durable) local queue after the provision row was committed, and forwarded to
+    /// ProvisionFunction over NATS. Failures are retried by Wolverine (see AddProvisioningMessaging).
+    /// </summary>
     public static async Task Handle(
         ProvisionService message,
         ProvisioningDbContext db,
-        ICloudFunctionTrigger cloudFunction,
+        IProvisioningQueue queue,
         ILogger<ProvisionService> logger,
         CancellationToken ct)
     {
@@ -20,6 +23,6 @@ public static class ProvisionServiceHandler
             return;
         }
 
-        await cloudFunction.TriggerProvisioningAsync(provision, ct);
+        await queue.ProvisionAsync(provision, ct);
     }
 }

@@ -4,5 +4,6 @@ public enum ProvisioningStatus
 {
     Queued,
     Provisioned,
-    Failed
+    Failed,
+    Deleting
 }

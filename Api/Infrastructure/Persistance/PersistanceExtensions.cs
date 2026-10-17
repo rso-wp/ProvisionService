@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Wolverine;
 using Wolverine.EntityFrameworkCore;
+using Wolverine.ErrorHandling;
 using Wolverine.Postgresql;
 
 namespace Api.Infrastructure.Persistance;
@@ -27,5 +28,10 @@ public static class PersistanceExtensions
         options.PersistMessagesWithPostgresql(configuration.GetDefaultConnectionString(), ProvisioningDbContext.Schema);
         options.UseEntityFrameworkCoreTransactions();
         options.Policies.UseDurableLocalQueues();
+
+        // Handlers forward to NATS; if it is down, keep retrying instead of dead-lettering the message.
+        options.OnException<Exception>()
+            .RetryWithCooldown(TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(30))
+            .Then.ScheduleRetry(TimeSpan.FromMinutes(1), TimeSpan.FromMinutes(5), TimeSpan.FromMinutes(15));
     }
 }

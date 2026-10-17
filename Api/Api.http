@@ -13,3 +13,8 @@ Content-Type: application/json
 { "name": "my-site" }
 
 ###
+
+DELETE {{Api_HostAddress}}/provisions/my-site
+Authorization: Bearer {{Token}}
+
+###
