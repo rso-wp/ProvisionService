@@ -1,4 +1,6 @@
 using Api.Domain;
+using Api.Features.PostProvisions;
+using Microsoft.Extensions.Options;
 using NATS.Client.JetStream;
 
 namespace Api.Infrastructure.Messaging;
@@ -10,17 +12,18 @@ public interface IProvisioningQueue
     Task DeprovisionAsync(ProvisionedService provision, CancellationToken ct);
 }
 
-public class NatsProvisioningQueue(INatsJSContext js) : IProvisioningQueue
+public class NatsProvisioningQueue(INatsJSContext js, IOptions<ProvisioningOptions> options) : IProvisioningQueue
 {
     public async Task ProvisionAsync(ProvisionedService provision, CancellationToken ct)
     {
         await js.EnsureProvisioningStreamAsync(ct);
-        await js.PublishJsonAsync(ProvisioningSubjects.Provision, new ProvisionTenantSite(provision.Id, provision.Name), ct);
+        await js.PublishJsonAsync(ProvisioningSubjects.Provision, new ProvisionTenantSite(
+            provision.Id, provision.Tenant, provision.Name, provision.Host(options.Value.BaseDomain)), ct);
     }
 
     public async Task DeprovisionAsync(ProvisionedService provision, CancellationToken ct)
     {
         await js.EnsureProvisioningStreamAsync(ct);
-        await js.PublishJsonAsync(ProvisioningSubjects.Deprovision, new DeprovisionTenantSite(provision.Id, provision.Name), ct);
+        await js.PublishJsonAsync(ProvisioningSubjects.Deprovision, new DeprovisionTenantSite(provision.Id, provision.Tenant, provision.Name), ct);
     }
 }

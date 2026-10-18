@@ -5,6 +5,7 @@ using Api.Features.PostProvisions;
 using Api.Infrastructure.Auth;
 using Api.Infrastructure.Messaging;
 using Api.Features.ProvisioningEvents;
+using Api.Features.Tenants;
 using Api.Infrastructure.Persistance;
 using Api.Protos;
 using Microsoft.EntityFrameworkCore;
@@ -27,6 +28,7 @@ builder.Services.AddOptions<ProvisioningOptions>()
 builder.Services.AddProvisioningQueue(builder.Configuration);
 builder.Services.AddHostedService<ProvisioningEventsConsumer>();
 builder.Services.AddHostedService<SubscriptionEndedConsumer>();
+builder.Services.AddHostedService<TenantAssignedConsumer>();
 
 builder.Host.UseWolverine(opts => opts.AddProvisioningMessaging(builder.Configuration));
 

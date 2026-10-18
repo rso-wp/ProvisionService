@@ -20,9 +20,10 @@ public static class ProvisioningSubjects
     public const string Destroyed = "provisioning.events.destroyed";
 }
 
-public record ProvisionTenantSite(Guid ProvisionId, string Name);
+/// <summary>Start the site <c>Name.Tenant.&lt;domain&gt;</c>; <see cref="Host"/> is that full host name.</summary>
+public record ProvisionTenantSite(Guid ProvisionId, string Tenant, string Name, string Host);
 
-public record DeprovisionTenantSite(Guid ProvisionId, string Name);
+public record DeprovisionTenantSite(Guid ProvisionId, string Tenant, string Name);
 
 public record TenantSiteProvisioned(Guid ProvisionId, string Url);
 

@@ -10,7 +10,7 @@ POST {{Api_HostAddress}}/provisions
 Authorization: Bearer {{Token}}
 Content-Type: application/json
 
-{ "name": "my-site" }
+{ "name": "my-site", "paymentMethodId": "" }
 
 ###
 

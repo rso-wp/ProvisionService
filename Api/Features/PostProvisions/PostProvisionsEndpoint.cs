@@ -12,21 +12,24 @@ using Wolverine.EntityFrameworkCore;
 
 namespace Api.Features.PostProvisions;
 
-public record ProvisionRequest(string Name);
+/// <param name="Name">Site name, unique within the user's tenant: the site is served at name.tenant.baseDomain.</param>
+/// <param name="PaymentMethodId">Stripe payment method (card) to charge; empty = the customer's default card.</param>
+public record ProvisionRequest(string Name, string? PaymentMethodId);
 
-public record ProvisionResponse(Guid ProvisionId, string Name, ProvisioningStatus ProvisioningStatus);
+public record ProvisionResponse(Guid ProvisionId, string Name, string Host, ProvisioningStatus ProvisioningStatus);
 
 public static partial class PostProvisionsEndpoint
 {
     private const string SubscriptionSuccessful = "SUCCESSFUL";
 
-    // A DNS label: it becomes part of the tenant's host name and helm release name.
+    // A DNS label: it becomes part of the site's host name.
     [GeneratedRegex("^[a-z0-9]([-a-z0-9]{0,28}[a-z0-9])?$")]
-    private static partial Regex TenantName();
+    private static partial Regex SiteName();
 
     /// <summary>
-    /// POST /provisions. Asks PaymentService whether the subscription can start, then stores a Queued
+    /// POST /provisions. Asks PaymentService whether the subscription can start (fail fast), then stores a Queued
     /// provision and a <see cref="ProvisionService"/> message in one transaction (Wolverine outbox).
+    /// All errors are ProblemDetails; <c>detail</c> is safe to show the user.
     /// </summary>
     public static IEndpointRouteBuilder MapPostProvisions(this IEndpointRouteBuilder app)
     {
@@ -39,15 +42,20 @@ public static partial class PostProvisionsEndpoint
                 ILogger<ProvisionRequest> logger,
                 CancellationToken ct) =>
             {
-                if (request.Name is null || !TenantName().IsMatch(request.Name))
-                    return Results.BadRequest(
-                        "Name must be 1-30 characters: lowercase letters, digits and '-', not starting or ending with '-'.");
+                if (request.Name is null || !SiteName().IsMatch(request.Name))
+                    return Problem(StatusCodes.Status400BadRequest,
+                        "Use lowercase letters, numbers and hyphens (not at the start or end), up to 30 characters.");
 
                 var userId = user.GetUserId();
                 var db = outbox.DbContext;
 
-                if (await db.ProvisionedServices.AnyAsync(p => p.Name == request.Name, ct))
-                    return Results.Conflict($"Name '{request.Name}' is taken.");
+                var tenant = await db.UserTenants.FindAsync([userId], ct);
+                if (tenant is null)
+                    return Problem(StatusCodes.Status409Conflict,
+                        "Your account is still being set up. Please try again in a few seconds.");
+
+                if (await db.ProvisionedServices.AnyAsync(p => p.Tenant == tenant.Tenant && p.Name == request.Name, ct))
+                    return Problem(StatusCodes.Status409Conflict, $"You already have a site called \"{request.Name}\".");
 
                 TryMakeSubscriptionResponse subscription;
                 try
@@ -57,28 +65,28 @@ public static partial class PostProvisionsEndpoint
                         {
                             UserId = userId.ToString(),
                             StripePriceId = options.Value.StripePriceId,
-                            ServiceId = ProvisioningOptions.ServiceId
+                            ServiceId = ProvisioningOptions.ServiceId,
+                            PaymentMethodId = request.PaymentMethodId ?? ""
                         },
                         cancellationToken: ct);
                 }
                 catch (RpcException ex)
                 {
                     logger.LogError(ex, "TryMakeSubscription failed for user {UserId}", userId);
-                    return Results.Problem(
-                        "Payment service is unavailable.", statusCode: StatusCodes.Status502BadGateway);
+                    return Problem(StatusCodes.Status502BadGateway, "Payments are unavailable right now. Please try again.");
                 }
 
                 if (subscription.Status != SubscriptionSuccessful)
-                    return Results.Problem(
+                    return Problem(StatusCodes.Status402PaymentRequired,
                         string.IsNullOrEmpty(subscription.Reason)
-                            ? $"Subscription could not be started ({subscription.Status})."
-                            : subscription.Reason,
-                        statusCode: StatusCodes.Status402PaymentRequired);
+                            ? "The subscription could not be started."
+                            : subscription.Reason);
 
                 var provision = new ProvisionedService
                 {
                     Id = Guid.NewGuid(),
                     UserId = userId,
+                    Tenant = tenant.Tenant,
                     Name = request.Name,
                     StripeSubscriptionId = subscription.StripeSubscriptionId,
                     ProvisioningStatus = ProvisioningStatus.Queued,
@@ -93,17 +101,23 @@ public static partial class PostProvisionsEndpoint
                 }
                 catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
                 {
-                    // Lost a race for the same name after the subscription was already started.
-                    logger.LogError(ex, "Name {Name} taken concurrently; subscription {Subscription} needs cancelling",
+                    // Lost a race for the same name after the subscription was started: do not leave it charging.
+                    logger.LogWarning(ex, "Name {Name} taken concurrently; cancelling subscription {Subscription}",
                         request.Name, subscription.StripeSubscriptionId);
-                    return Results.Conflict($"Name '{request.Name}' is taken.");
+                    await payments.StopSubscriptionAsync(
+                        new StopSubscriptionRequest { StripeSubscriptionId = subscription.StripeSubscriptionId },
+                        cancellationToken: CancellationToken.None);
+                    return Problem(StatusCodes.Status409Conflict, $"You already have a site called \"{request.Name}\".");
                 }
 
                 return Results.Accepted($"/provisions/{provision.Id}",
-                    new ProvisionResponse(provision.Id, provision.Name, provision.ProvisioningStatus));
+                    new ProvisionResponse(
+                        provision.Id, provision.Name, provision.Host(options.Value.BaseDomain), provision.ProvisioningStatus));
             })
             .RequireAuthorization();
 
         return app;
     }
+
+    private static IResult Problem(int status, string detail) => Results.Problem(detail: detail, statusCode: status);
 }

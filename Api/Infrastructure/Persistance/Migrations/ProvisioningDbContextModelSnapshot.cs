@@ -48,6 +48,11 @@ namespace Api.Infrastructure.Persistance.Migrations
                         .HasMaxLength(255)
                         .HasColumnType("character varying(255)");
 
+                    b.Property<string>("Tenant")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)");
+
                     b.Property<string>("Url")
                         .HasMaxLength(255)
                         .HasColumnType("character varying(255)");
@@ -57,15 +62,33 @@ namespace Api.Infrastructure.Persistance.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("Name")
-                        .IsUnique();
-
                     b.HasIndex("StripeSubscriptionId")
                         .IsUnique();
 
                     b.HasIndex("UserId");
 
+                    b.HasIndex("Tenant", "Name")
+                        .IsUnique();
+
                     b.ToTable("ProvisionedServices", "provisioning_service");
+                });
+
+            modelBuilder.Entity("Api.Domain.UserTenant", b =>
+                {
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Tenant")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)");
+
+                    b.HasKey("UserId");
+
+                    b.HasIndex("Tenant")
+                        .IsUnique();
+
+                    b.ToTable("UserTenants", "provisioning_service");
                 });
 
             modelBuilder.Entity("Wolverine.EntityFrameworkCore.Internals.IncomingMessage", b =>

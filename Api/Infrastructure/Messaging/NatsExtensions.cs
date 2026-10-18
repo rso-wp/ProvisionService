@@ -25,6 +25,10 @@ public static class NatsExtensions
     public static Task EnsureProvisioningStreamAsync(this INatsJSContext js, CancellationToken ct) =>
         js.EnsureStreamAsync(ProvisioningSubjects.Stream, ProvisioningSubjects.All, ct);
 
+    /// <summary>Creates the stream if missing. UserService declares the same stream.</summary>
+    public static Task EnsureUsersStreamAsync(this INatsJSContext js, CancellationToken ct) =>
+        js.EnsureStreamAsync(UserSubjects.Stream, UserSubjects.All, ct);
+
     /// <summary>Creates the stream if missing. PaymentService declares the same stream.</summary>
     public static Task EnsurePaymentsStreamAsync(this INatsJSContext js, CancellationToken ct) =>
         js.EnsureStreamAsync(PaymentSubjects.Stream, PaymentSubjects.All, ct);

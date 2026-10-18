@@ -11,4 +11,8 @@ public class ProvisioningOptions
 
     [Required]
     public string StripePriceId { get; set; } = "";
+
+    /// <summary>Sites are served at site.tenant.BaseDomain.</summary>
+    [Required]
+    public string BaseDomain { get; set; } = "";
 }
