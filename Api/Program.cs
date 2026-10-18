@@ -14,7 +14,7 @@ using Wolverine;
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddProvisioningPersistence(builder.Configuration);
-builder.Services.AddEntraAuth(builder.Configuration, builder.Environment);
+builder.Services.AddJwtAuth(builder.Configuration);
 builder.Services.AddOpenApi();
 builder.Services.ConfigureHttpJsonOptions(o => o.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 
