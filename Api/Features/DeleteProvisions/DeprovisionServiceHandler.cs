@@ -5,7 +5,7 @@ namespace Api.Features.DeleteProvisions;
 
 public static class DeprovisionServiceHandler
 {
-    /// <summary>Forwards the delete to ProvisionFunction over NATS once the Deleting status was committed.</summary>
+    /// <summary>Forwards the delete to ProvisionFunction (storage queue) once the Deleting status was committed.</summary>
     public static async Task Handle(
         DeprovisionService message,
         ProvisioningDbContext db,
@@ -20,6 +20,6 @@ public static class DeprovisionServiceHandler
             return;
         }
 
-        await queue.DeprovisionAsync(provision, ct);
+        await queue.DeprovisionAsync(new DeprovisionTenantSite(provision.Id, provision.Tenant, provision.Name), ct);
     }
 }

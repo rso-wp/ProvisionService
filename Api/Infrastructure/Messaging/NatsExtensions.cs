@@ -9,21 +9,17 @@ public static class NatsExtensions
 {
     public static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
-    public static IServiceCollection AddProvisioningQueue(this IServiceCollection services, IConfiguration configuration)
+    /// <summary>NATS JetStream: user and payment events (USERS, PAYMENTS). Provisioning uses the storage queues.</summary>
+    public static IServiceCollection AddNats(this IServiceCollection services, IConfiguration configuration)
     {
         var url = configuration["Nats:Url"]
             ?? throw new InvalidOperationException("'Nats:Url' is not configured.");
 
         services.AddSingleton(new NatsClient(url));
         services.AddSingleton(sp => sp.GetRequiredService<NatsClient>().CreateJetStreamContext());
-        services.AddSingleton<IProvisioningQueue, NatsProvisioningQueue>();
 
         return services;
     }
-
-    /// <summary>Creates the stream if missing. ProvisionFunction declares the same stream.</summary>
-    public static Task EnsureProvisioningStreamAsync(this INatsJSContext js, CancellationToken ct) =>
-        js.EnsureStreamAsync(ProvisioningSubjects.Stream, ProvisioningSubjects.All, ct);
 
     /// <summary>Creates the stream if missing. UserService declares the same stream.</summary>
     public static Task EnsureUsersStreamAsync(this INatsJSContext js, CancellationToken ct) =>

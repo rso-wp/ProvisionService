@@ -2,8 +2,10 @@ using System.Text.Json.Serialization;
 using Api.Features.DeleteProvisions;
 using Api.Features.GetProvisions;
 using Api.Features.PostProvisions;
+using Api.Infrastructure.ApiDocs;
 using Api.Infrastructure.Auth;
 using Api.Infrastructure.Messaging;
+using Api.Infrastructure.Observability;
 using Api.Features.ProvisioningEvents;
 using Api.Features.Tenants;
 using Api.Infrastructure.Persistance;
@@ -15,7 +17,9 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddProvisioningPersistence(builder.Configuration);
 builder.Services.AddJwtAuth(builder.Configuration);
-builder.Services.AddOpenApi();
+builder.Services.AddApiDocs("ProvisioningService API");
+builder.Services.AddServiceHealthChecks<ProvisioningDbContext>();
+builder.Services.AddObservability("provisioning-service");
 builder.Services.ConfigureHttpJsonOptions(o => o.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 
 builder.Services.AddGrpcClient<Payment.PaymentClient>(o =>
@@ -25,7 +29,8 @@ builder.Services.AddOptions<ProvisioningOptions>()
     .Bind(builder.Configuration.GetSection(ProvisioningOptions.SectionName))
     .ValidateDataAnnotations()
     .ValidateOnStart();
-builder.Services.AddProvisioningQueue(builder.Configuration);
+builder.Services.AddNats(builder.Configuration);
+builder.Services.AddProvisioningQueues(builder.Configuration);
 builder.Services.AddHostedService<ProvisioningEventsConsumer>();
 builder.Services.AddHostedService<SubscriptionEndedConsumer>();
 builder.Services.AddHostedService<TenantAssignedConsumer>();
@@ -34,10 +39,9 @@ builder.Host.UseWolverine(opts => opts.AddProvisioningMessaging(builder.Configur
 
 var app = builder.Build();
 
-if (app.Environment.IsDevelopment())
+// Always in Development; elsewhere when Database:MigrateOnStartup is set (the helm chart's migrateOnStartup).
+if (app.Environment.IsDevelopment() || app.Configuration.GetValue<bool>("Database:MigrateOnStartup"))
 {
-    app.MapOpenApi();
-
     using var scope = app.Services.CreateScope();
     var db = scope.ServiceProvider.GetRequiredService<ProvisioningDbContext>();
     await db.Database.MigrateAsync();
@@ -49,5 +53,7 @@ app.UseAuthorization();
 app.MapGetProvisions();
 app.MapPostProvisions();
 app.MapDeleteProvisions();
+app.MapObservability();
+app.MapApiDocs("ProvisioningService API");
 
 await app.RunAsync();
