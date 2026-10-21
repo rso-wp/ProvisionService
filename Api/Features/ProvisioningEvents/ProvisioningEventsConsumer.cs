@@ -1,31 +1,45 @@
-using System.Text.Json;
 using Api.Domain;
 using Api.Infrastructure.Messaging;
 using Api.Infrastructure.Persistance;
+using Azure.Storage.Queues;
+using Azure.Storage.Queues.Models;
 using Microsoft.EntityFrameworkCore;
-using NATS.Client.JetStream;
-using NATS.Client.JetStream.Models;
 
 namespace Api.Features.ProvisioningEvents;
 
 /// <summary>
-/// Durable JetStream consumer for the events ProvisionFunction publishes. Updates the provision row and acks;
-/// on failure the event is redelivered.
+/// Reads the events ProvisionFunction sends to <see cref="ProvisioningQueues.Events"/> and updates the provision rows. A
+/// message is deleted once handled; on failure it becomes visible again after the visibility timeout and is retried, up to
+/// <see cref="ProvisioningQueues.MaxAttempts"/> times.
 /// </summary>
 public class ProvisioningEventsConsumer(
-    INatsJSContext js,
+    QueueServiceClient queues,
+    IProvisioningQueue commands,
     IServiceScopeFactory scopes,
     ILogger<ProvisioningEventsConsumer> logger) : BackgroundService
 {
-    private const string ConsumerName = "provisioning-service";
+    private static readonly TimeSpan VisibilityTimeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan IdleDelay = TimeSpan.FromSeconds(2);
 
     protected override async Task ExecuteAsync(CancellationToken ct)
     {
+        var queue = queues.GetQueueClient(ProvisioningQueues.Events);
+        var ready = false;
+
         while (!ct.IsCancellationRequested)
         {
             try
             {
-                await ConsumeAsync(ct);
+                if (!ready)
+                {
+                    await queues.EnsureProvisioningQueuesAsync(ct);
+                    ready = true;
+                    logger.LogInformation("Listening on queue {Queue}", ProvisioningQueues.Events);
+                }
+
+                QueueMessage[] messages = await queue.ReceiveMessagesAsync(16, VisibilityTimeout, ct);
+                foreach (var message in messages) await HandleMessageAsync(queue, message, ct);
+                if (messages.Length == 0) await Task.Delay(IdleDelay, ct);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
@@ -33,82 +47,81 @@ public class ProvisioningEventsConsumer(
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "NATS consumer stopped, reconnecting in 5s");
+                logger.LogError(ex, "Reading queue {Queue} failed, retrying in 5s", ProvisioningQueues.Events);
                 await Task.Delay(TimeSpan.FromSeconds(5), ct);
             }
         }
     }
 
-    private async Task ConsumeAsync(CancellationToken ct)
+    private async Task HandleMessageAsync(QueueClient queue, QueueMessage message, CancellationToken ct)
     {
-        await js.EnsureProvisioningStreamAsync(ct);
-
-        var consumer = await js.CreateOrUpdateConsumerAsync(
-            ProvisioningSubjects.Stream,
-            new ConsumerConfig(ConsumerName)
-            {
-                FilterSubject = ProvisioningSubjects.Events,
-                AckPolicy = ConsumerConfigAckPolicy.Explicit
-            },
-            ct);
-
-        await foreach (var msg in consumer.ConsumeAsync<byte[]>(cancellationToken: ct))
+        try
         {
-            try
-            {
-                await HandleAsync(msg.Subject, msg.Data ?? [], ct);
-                await msg.AckAsync(cancellationToken: ct);
-            }
-            catch (Exception ex) when (!ct.IsCancellationRequested)
-            {
-                logger.LogError(ex, "Handling {Subject} failed, retrying", msg.Subject);
-                await msg.NakAsync(delay: TimeSpan.FromSeconds(5), cancellationToken: ct);
-            }
+            var e = message.Body.ToObjectFromJson<ProvisioningEvent>(ProvisioningQueueExtensions.Json)
+                ?? throw new InvalidOperationException("Empty provisioning event.");
+            await HandleAsync(e, ct);
         }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            if (message.DequeueCount < ProvisioningQueues.MaxAttempts)
+            {
+                logger.LogError(ex, "Handling event {MessageId} failed (attempt {Attempt}), retrying", message.MessageId, message.DequeueCount);
+                return;
+            }
+            logger.LogError(ex, "Dropping event {MessageId} after {Attempt} attempts: {Body}",
+                message.MessageId, message.DequeueCount, message.Body.ToString());
+        }
+
+        await queue.DeleteMessageAsync(message.MessageId, message.PopReceipt, ct);
     }
 
-    private async Task HandleAsync(string subject, byte[] data, CancellationToken ct)
+    private async Task HandleAsync(ProvisioningEvent e, CancellationToken ct)
     {
         using var scope = scopes.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<ProvisioningDbContext>();
+        var provision = await db.ProvisionedServices.FindAsync([e.ProvisionId], ct);
 
-        switch (subject)
+        switch (e.Type)
         {
-            case ProvisioningSubjects.Provisioned:
-            {
-                var e = Deserialize<TenantSiteProvisioned>(data);
-                var provision = await db.ProvisionedServices.FindAsync([e.ProvisionId], ct);
-                if (provision is null || provision.ProvisioningStatus == ProvisioningStatus.Deleting) return;
-
+            case ProvisioningEventTypes.Provisioned:
+                if (provision is null || provision.ProvisioningStatus == ProvisioningStatus.Deleting)
+                {
+                    await RemoveLateSiteAsync(db, e, provision, ct);
+                    return;
+                }
                 provision.ProvisioningStatus = ProvisioningStatus.Provisioned;
                 provision.Url = e.Url;
                 break;
-            }
-            case ProvisioningSubjects.ProvisioningFailed:
-            {
-                var e = Deserialize<TenantSiteProvisioningFailed>(data);
-                var provision = await db.ProvisionedServices.FindAsync([e.ProvisionId], ct);
+
+            case ProvisioningEventTypes.ProvisioningFailed:
                 if (provision is null || provision.ProvisioningStatus == ProvisioningStatus.Deleting) return;
 
                 logger.LogWarning("Provision {ProvisionId} failed: {Reason}", e.ProvisionId, e.Reason);
                 provision.ProvisioningStatus = ProvisioningStatus.Failed;
                 break;
-            }
-            case ProvisioningSubjects.Destroyed:
-            {
-                var e = Deserialize<TenantSiteDestroyed>(data);
-                await db.ProvisionedServices.Where(p => p.Id == e.ProvisionId).ExecuteDeleteAsync(ct);
-                return;
-            }
+
+            case ProvisioningEventTypes.Destroyed:
+                if (provision is not null) db.ProvisionedServices.Remove(provision);
+                break;
+
             default:
-                logger.LogWarning("Ignoring event on unknown subject {Subject}", subject);
+                logger.LogWarning("Ignoring provisioning event of unknown type {Type}", e.Type);
                 return;
         }
 
         await db.SaveChangesAsync(ct);
     }
 
-    private static T Deserialize<T>(byte[] data) =>
-        JsonSerializer.Deserialize<T>(data, NatsExtensions.Json)
-        ?? throw new InvalidOperationException($"Empty {typeof(T).Name} event.");
+    /// <summary>
+    /// The queues do not keep commands in order, so a site can finish starting after it was deleted (its row is Deleting,
+    /// or already gone). Remove it again, unless a new site with the same name has been created since.
+    /// </summary>
+    private async Task RemoveLateSiteAsync(ProvisioningDbContext db, ProvisioningEvent e, ProvisionedService? provision, CancellationToken ct)
+    {
+        if (provision is null && await db.ProvisionedServices.AnyAsync(p => p.Tenant == e.Tenant && p.Name == e.Name, ct))
+            return;
+
+        logger.LogInformation("Site {Name}.{Tenant} came up after it was deleted, removing it again", e.Name, e.Tenant);
+        await commands.DeprovisionAsync(new DeprovisionTenantSite(e.ProvisionId, e.Tenant, e.Name), ct);
+    }
 }

@@ -7,7 +7,7 @@ public static class ProvisionServiceHandler
 {
     /// <summary>
     /// Picked up by Wolverine from the (durable) local queue after the provision row was committed, and forwarded to
-    /// ProvisionFunction over NATS. Failures are retried by Wolverine (see AddProvisioningMessaging).
+    /// ProvisionFunction (storage queue). Failures are retried by Wolverine (see AddProvisioningMessaging).
     /// </summary>
     public static async Task Handle(
         ProvisionService message,
