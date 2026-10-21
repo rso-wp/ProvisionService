@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using Api.Domain;
+using Api.Features.PostProvisions;
 using Api.Infrastructure.Auth;
 using Api.Infrastructure.Persistance;
 using Api.Protos;
@@ -38,10 +39,17 @@ public static class DeleteProvisionsEndpoint
                 // Already being deleted: nothing more to do.
                 if (provision.ProvisioningStatus == ProvisioningStatus.Deleting) return Results.Accepted();
 
+                // Whether there is a subscription to stop is only known once the payment is resolved (a minute or two).
+                if (provision.ProvisioningStatus == ProvisioningStatus.PendingPayment)
+                    return Results.Problem(
+                        "The payment for this site is still being confirmed. Please try again in a minute.",
+                        statusCode: StatusCodes.Status409Conflict);
+
                 try
                 {
                     var stopped = await payments.StopSubscriptionAsync(
                         new StopSubscriptionRequest { StripeSubscriptionId = provision.StripeSubscriptionId },
+                        deadline: PendingPayments.Deadline(),
                         cancellationToken: ct);
 
                     if (stopped.Status != SubscriptionStopped)
@@ -56,9 +64,11 @@ public static class DeleteProvisionsEndpoint
                         "Payment service is unavailable.", statusCode: StatusCodes.Status502BadGateway);
                 }
 
+                // The subscription is stopped: the site must go too, even if the client has disconnected by now.
                 provision.ProvisioningStatus = ProvisioningStatus.Deleting;
+                provision.UpdatedAt = DateTime.UtcNow;
                 await outbox.PublishAsync(new DeprovisionService(provision.Id));
-                await outbox.SaveChangesAndFlushMessagesAsync(ct);
+                await outbox.SaveChangesAndFlushMessagesAsync(CancellationToken.None);
 
                 return Results.Accepted();
             })

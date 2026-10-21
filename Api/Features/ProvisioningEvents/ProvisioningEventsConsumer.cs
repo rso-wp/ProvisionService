@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Api.Domain;
 using Api.Infrastructure.Messaging;
 using Api.Infrastructure.Persistance;
@@ -9,8 +10,9 @@ namespace Api.Features.ProvisioningEvents;
 
 /// <summary>
 /// Reads the events ProvisionFunction sends to <see cref="ProvisioningQueues.Events"/> and updates the provision rows. A
-/// message is deleted once handled; on failure it becomes visible again after the visibility timeout and is retried, up to
-/// <see cref="ProvisioningQueues.MaxAttempts"/> times.
+/// message is deleted once handled. A failure (almost always the database being unavailable) never drops it: it becomes
+/// visible again after a delay that grows with each attempt, up to <see cref="MaxRetryDelay"/>. Only a message that cannot
+/// be read at all is moved to <see cref="ProvisioningQueues.EventsPoison"/>.
 /// </summary>
 public class ProvisioningEventsConsumer(
     QueueServiceClient queues,
@@ -19,6 +21,7 @@ public class ProvisioningEventsConsumer(
     ILogger<ProvisioningEventsConsumer> logger) : BackgroundService
 {
     private static readonly TimeSpan VisibilityTimeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan MaxRetryDelay = TimeSpan.FromMinutes(10);
     private static readonly TimeSpan IdleDelay = TimeSpan.FromSeconds(2);
 
     protected override async Task ExecuteAsync(CancellationToken ct)
@@ -55,73 +58,109 @@ public class ProvisioningEventsConsumer(
 
     private async Task HandleMessageAsync(QueueClient queue, QueueMessage message, CancellationToken ct)
     {
+        if (Read(message) is not { } e)
+        {
+            logger.LogError("Moving unreadable event {MessageId} to {Queue}: {Body}",
+                message.MessageId, ProvisioningQueues.EventsPoison, message.Body.ToString());
+            await queues.GetQueueClient(ProvisioningQueues.EventsPoison)
+                .SendMessageAsync(message.Body, timeToLive: ProvisioningQueues.Forever, cancellationToken: ct);
+            await queue.DeleteMessageAsync(message.MessageId, message.PopReceipt, ct);
+            return;
+        }
+
         try
         {
-            var e = message.Body.ToObjectFromJson<ProvisioningEvent>(ProvisioningQueueExtensions.Json)
-                ?? throw new InvalidOperationException("Empty provisioning event.");
             await HandleAsync(e, ct);
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
-            if (message.DequeueCount < ProvisioningQueues.MaxAttempts)
-            {
-                logger.LogError(ex, "Handling event {MessageId} failed (attempt {Attempt}), retrying", message.MessageId, message.DequeueCount);
-                return;
-            }
-            logger.LogError(ex, "Dropping event {MessageId} after {Attempt} attempts: {Body}",
-                message.MessageId, message.DequeueCount, message.Body.ToString());
+            var delay = RetryDelay(message.DequeueCount);
+            logger.LogError(ex, "Handling event {MessageId} ({Type} {ProvisionId}) failed (attempt {Attempt}), retrying in {Delay}",
+                message.MessageId, e.Type, e.ProvisionId, message.DequeueCount, delay);
+            await queue.UpdateMessageAsync(message.MessageId, message.PopReceipt, visibilityTimeout: delay, cancellationToken: ct);
+            return;
         }
 
         await queue.DeleteMessageAsync(message.MessageId, message.PopReceipt, ct);
     }
 
+    private static ProvisioningEvent? Read(QueueMessage message)
+    {
+        try
+        {
+            return message.Body.ToObjectFromJson<ProvisioningEvent>(ProvisioningQueueExtensions.Json);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>30 s after the first failure, doubling up to <see cref="MaxRetryDelay"/>.</summary>
+    private static TimeSpan RetryDelay(long attempt) =>
+        TimeSpan.FromTicks(Math.Min(MaxRetryDelay.Ticks, VisibilityTimeout.Ticks << (int)Math.Clamp(attempt - 1, 0, 10)));
+
+    /// <summary>
+    /// Status changes are conditional updates, so an event never overwrites a delete committed in the meantime (the event
+    /// may have been read before it).
+    /// </summary>
     private async Task HandleAsync(ProvisioningEvent e, CancellationToken ct)
     {
         using var scope = scopes.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<ProvisioningDbContext>();
-        var provision = await db.ProvisionedServices.FindAsync([e.ProvisionId], ct);
+        var site = db.ProvisionedServices.Where(p => p.Id == e.ProvisionId);
+        var now = DateTime.UtcNow;
 
         switch (e.Type)
         {
             case ProvisioningEventTypes.Provisioned:
-                if (provision is null || provision.ProvisioningStatus == ProvisioningStatus.Deleting)
-                {
-                    await RemoveLateSiteAsync(db, e, provision, ct);
-                    return;
-                }
-                provision.ProvisioningStatus = ProvisioningStatus.Provisioned;
-                provision.Url = e.Url;
+                // Provisioned too: a repeated event only sets the same values again.
+                var running = await site
+                    .Where(p => p.ProvisioningStatus == ProvisioningStatus.Queued
+                                || p.ProvisioningStatus == ProvisioningStatus.Failed
+                                || p.ProvisioningStatus == ProvisioningStatus.Provisioned)
+                    .ExecuteUpdateAsync(s => s
+                        .SetProperty(p => p.ProvisioningStatus, ProvisioningStatus.Provisioned)
+                        .SetProperty(p => p.Url, e.Url)
+                        .SetProperty(p => p.UpdatedAt, now), ct);
+                if (running == 0) await RemoveLateSiteAsync(e, "came up after it was deleted", ct);
                 break;
 
             case ProvisioningEventTypes.ProvisioningFailed:
-                if (provision is null || provision.ProvisioningStatus == ProvisioningStatus.Deleting) return;
-
-                logger.LogWarning("Provision {ProvisionId} failed: {Reason}", e.ProvisionId, e.Reason);
-                provision.ProvisioningStatus = ProvisioningStatus.Failed;
+                var failed = await site
+                    .Where(p => p.ProvisioningStatus == ProvisioningStatus.Queued || p.ProvisioningStatus == ProvisioningStatus.Failed)
+                    .ExecuteUpdateAsync(s => s
+                        .SetProperty(p => p.ProvisioningStatus, ProvisioningStatus.Failed)
+                        .SetProperty(p => p.UpdatedAt, now), ct);
+                if (failed == 1)
+                {
+                    logger.LogWarning("Provision {ProvisionId} failed: {Reason}", e.ProvisionId, e.Reason);
+                    break;
+                }
+                // Running already: an older attempt failed after a later one succeeded. Otherwise the site is being
+                // deleted or gone, and the failed attempt may have left parts of it behind.
+                if (!await site.AnyAsync(p => p.ProvisioningStatus == ProvisioningStatus.Provisioned, ct))
+                    await RemoveLateSiteAsync(e, "failed after it was deleted", ct);
                 break;
 
             case ProvisioningEventTypes.Destroyed:
-                if (provision is not null) db.ProvisionedServices.Remove(provision);
+                await site.ExecuteDeleteAsync(ct);
                 break;
 
             default:
                 logger.LogWarning("Ignoring provisioning event of unknown type {Type}", e.Type);
-                return;
+                break;
         }
-
-        await db.SaveChangesAsync(ct);
     }
 
     /// <summary>
-    /// The queues do not keep commands in order, so a site can finish starting after it was deleted (its row is Deleting,
-    /// or already gone). Remove it again, unless a new site with the same name has been created since.
+    /// The queues do not keep commands in order, so a site can finish starting (or fail half-way) after it was deleted: its
+    /// row is Deleting, or already gone. Everything created for a site is named after its provision id, so removing it
+    /// again can never touch a newer site with the same name.
     /// </summary>
-    private async Task RemoveLateSiteAsync(ProvisioningDbContext db, ProvisioningEvent e, ProvisionedService? provision, CancellationToken ct)
+    private async Task RemoveLateSiteAsync(ProvisioningEvent e, string what, CancellationToken ct)
     {
-        if (provision is null && await db.ProvisionedServices.AnyAsync(p => p.Tenant == e.Tenant && p.Name == e.Name, ct))
-            return;
-
-        logger.LogInformation("Site {Name}.{Tenant} came up after it was deleted, removing it again", e.Name, e.Tenant);
+        logger.LogInformation("Site {Name}.{Tenant} ({ProvisionId}) {What}, removing it", e.Name, e.Tenant, e.ProvisionId, what);
         await commands.DeprovisionAsync(new DeprovisionTenantSite(e.ProvisionId, e.Tenant, e.Name), ct);
     }
 }

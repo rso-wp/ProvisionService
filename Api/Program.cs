@@ -7,6 +7,7 @@ using Api.Infrastructure.Auth;
 using Api.Infrastructure.Messaging;
 using Api.Infrastructure.Observability;
 using Api.Features.ProvisioningEvents;
+using Api.Features.Reconciliation;
 using Api.Features.Tenants;
 using Api.Infrastructure.Persistance;
 using Api.Protos;
@@ -31,9 +32,11 @@ builder.Services.AddOptions<ProvisioningOptions>()
     .ValidateOnStart();
 builder.Services.AddNats(builder.Configuration);
 builder.Services.AddProvisioningQueues(builder.Configuration);
+builder.Services.AddUserTenants(builder.Configuration);
 builder.Services.AddHostedService<ProvisioningEventsConsumer>();
 builder.Services.AddHostedService<SubscriptionEndedConsumer>();
 builder.Services.AddHostedService<TenantAssignedConsumer>();
+builder.Services.AddHostedService<ProvisioningReconciler>();
 
 builder.Host.UseWolverine(opts => opts.AddProvisioningMessaging(builder.Configuration));
 

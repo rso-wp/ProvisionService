@@ -85,6 +85,7 @@ public class SubscriptionEndedConsumer(
             provision.Name, provision.Id, e.Reason);
 
         provision.ProvisioningStatus = ProvisioningStatus.Deleting;
+        provision.UpdatedAt = DateTime.UtcNow;
         await outbox.PublishAsync(new DeprovisionService(provision.Id));
         await outbox.SaveChangesAndFlushMessagesAsync(ct);
     }
