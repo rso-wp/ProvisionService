@@ -40,10 +40,14 @@ public static class ProvisioningQueueExtensions
         return services;
     }
 
-    /// <summary>Creates the three queues if missing (in Azure they are created by terraform; this is a no-op there).</summary>
+    /// <summary>Creates the queues if missing (in Azure they are created by terraform; this is a no-op there).</summary>
     public static async Task EnsureProvisioningQueuesAsync(this QueueServiceClient queues, CancellationToken ct)
     {
-        foreach (var name in new[] { ProvisioningQueues.Provision, ProvisioningQueues.Deprovision, ProvisioningQueues.Events })
+        foreach (var name in new[]
+                 {
+                     ProvisioningQueues.Provision, ProvisioningQueues.Deprovision, ProvisioningQueues.Events,
+                     ProvisioningQueues.EventsPoison
+                 })
             await queues.GetQueueClient(name).CreateIfNotExistsAsync(cancellationToken: ct);
     }
 }
@@ -58,6 +62,8 @@ public class StorageProvisioningQueue(QueueServiceClient queues, IOptions<Provis
         SendAsync(ProvisioningQueues.Deprovision, command, ct);
 
     private async Task SendAsync<T>(string queue, T message, CancellationToken ct) =>
-        await queues.GetQueueClient(queue)
-            .SendMessageAsync(BinaryData.FromObjectAsJson(message, ProvisioningQueueExtensions.Json), cancellationToken: ct);
+        await queues.GetQueueClient(queue).SendMessageAsync(
+            BinaryData.FromObjectAsJson(message, ProvisioningQueueExtensions.Json),
+            timeToLive: ProvisioningQueues.Forever,
+            cancellationToken: ct);
 }

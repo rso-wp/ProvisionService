@@ -29,9 +29,10 @@ public static class PersistanceExtensions
         options.UseEntityFrameworkCoreTransactions();
         options.Policies.UseDurableLocalQueues();
 
-        // Handlers forward to NATS; if it is down, keep retrying instead of dead-lettering the message.
+        // Handlers forward commands to the storage queues; if they are unreachable, retry for as long as it takes (every 15
+        // minutes in the end) instead of dead-lettering the command.
         options.OnException<Exception>()
             .RetryWithCooldown(TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(30))
-            .Then.ScheduleRetry(TimeSpan.FromMinutes(1), TimeSpan.FromMinutes(5), TimeSpan.FromMinutes(15));
+            .Then.ScheduleRetryIndefinitely(TimeSpan.FromMinutes(1), TimeSpan.FromMinutes(5), TimeSpan.FromMinutes(15));
     }
 }

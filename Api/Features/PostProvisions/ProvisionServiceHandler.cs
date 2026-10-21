@@ -1,3 +1,4 @@
+using Api.Domain;
 using Api.Infrastructure.Messaging;
 using Api.Infrastructure.Persistance;
 
@@ -17,9 +18,11 @@ public static class ProvisionServiceHandler
         CancellationToken ct)
     {
         var provision = await db.ProvisionedServices.FindAsync([message.ProvisionId], ct);
-        if (provision is null)
+        // Only a site that should be running: not one deleted (or being deleted) while this message waited.
+        if (provision is not { ProvisioningStatus: ProvisioningStatus.Queued or ProvisioningStatus.Failed })
         {
-            logger.LogWarning("Provision {ProvisionId} not found, dropping message.", message.ProvisionId);
+            logger.LogInformation("Provision {ProvisionId} is {Status}, not provisioning it", message.ProvisionId,
+                provision?.ProvisioningStatus.ToString() ?? "gone");
             return;
         }
 

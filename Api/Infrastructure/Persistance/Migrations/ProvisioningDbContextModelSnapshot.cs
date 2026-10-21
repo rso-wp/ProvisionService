@@ -44,7 +44,6 @@ namespace Api.Infrastructure.Persistance.Migrations
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("StripeSubscriptionId")
-                        .IsRequired()
                         .HasMaxLength(255)
                         .HasColumnType("character varying(255)");
 
@@ -52,6 +51,9 @@ namespace Api.Infrastructure.Persistance.Migrations
                         .IsRequired()
                         .HasMaxLength(30)
                         .HasColumnType("character varying(30)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("Url")
                         .HasMaxLength(255)
@@ -66,6 +68,8 @@ namespace Api.Infrastructure.Persistance.Migrations
                         .IsUnique();
 
                     b.HasIndex("UserId");
+
+                    b.HasIndex("ProvisioningStatus", "UpdatedAt");
 
                     b.HasIndex("Tenant", "Name")
                         .IsUnique();

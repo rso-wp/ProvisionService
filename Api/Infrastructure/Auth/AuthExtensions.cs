@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Security.Cryptography;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 
@@ -7,8 +8,9 @@ namespace Api.Infrastructure.Auth;
 public static class AuthExtensions
 {
     /// <summary>
-    /// Bearer validation of UserService's tokens. The signing key comes from UserService's discovery document
-    /// (`Auth:MetadataAddress`, cluster-internal http) and is refreshed when it changes.
+    /// Bearer validation of UserService's tokens. The signing key is either configured (`Auth:SigningPublicKey`, PEM), so
+    /// validating a token never depends on UserService being up, or read from UserService's discovery document
+    /// (`Auth:MetadataAddress`, cluster-internal http) and refreshed when it changes.
     /// </summary>
     public static IServiceCollection AddJwtAuth(this IServiceCollection services, IConfiguration configuration)
     {
@@ -20,8 +22,6 @@ public static class AuthExtensions
         services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             .AddJwtBearer(options =>
             {
-                options.MetadataAddress = Required("MetadataAddress");
-                options.RequireHttpsMetadata = false; // UserService is reached inside the cluster / on localhost
                 options.MapInboundClaims = false; // keep raw claim names (sub, email, ...)
                 options.TokenValidationParameters = new TokenValidationParameters
                 {
@@ -29,10 +29,29 @@ public static class AuthExtensions
                     ValidAudience = Required("Audience"),
                     ValidAlgorithms = [SecurityAlgorithms.RsaSha256]
                 };
+
+                if (section["SigningPublicKey"] is { Length: > 0 } publicKey)
+                {
+                    options.TokenValidationParameters.IssuerSigningKey = PublicKey(publicKey);
+                }
+                else
+                {
+                    options.MetadataAddress = Required("MetadataAddress");
+                    options.RequireHttpsMetadata = false; // UserService is reached inside the cluster / on localhost
+                }
             });
         services.AddAuthorization();
 
         return services;
+    }
+
+    /// <summary>The RSA public key (PEM), with the key id UserService puts in each token's `kid` (see its SigningKey).</summary>
+    private static RsaSecurityKey PublicKey(string pem)
+    {
+        var rsa = RSA.Create();
+        rsa.ImportFromPem(pem);
+        var keyId = Base64UrlEncoder.Encode(SHA256.HashData(rsa.ExportSubjectPublicKeyInfo()))[..16];
+        return new RsaSecurityKey(rsa) { KeyId = keyId };
     }
 
     public static Guid GetUserId(this ClaimsPrincipal principal) =>
