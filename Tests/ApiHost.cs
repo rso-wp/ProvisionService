@@ -23,7 +23,7 @@ using NSubstitute;
 using Wolverine;
 using Wolverine.EntityFrameworkCore;
 
-namespace Test;
+namespace Tests;
 
 /// <summary>
 /// The real provisioning endpoints (POST / GET / DELETE /provisions) in an in-process server, with an in-memory database,

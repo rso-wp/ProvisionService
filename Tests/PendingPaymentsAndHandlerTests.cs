@@ -10,7 +10,7 @@ using NSubstitute;
 using Wolverine;
 using Wolverine.EntityFrameworkCore;
 
-namespace Test;
+namespace Tests;
 
 /// <summary>What PaymentService's answer does to a PendingPayment site.</summary>
 public class PendingPaymentsTests : IDisposable

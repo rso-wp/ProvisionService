@@ -6,7 +6,7 @@ using Api.Protos;
 using Microsoft.EntityFrameworkCore;
 using NSubstitute;
 
-namespace Test;
+namespace Tests;
 
 /// <summary>POST /provisions: reserve the name, ask PaymentService, then queue the site or release the name.</summary>
 public class CreateProvisionTests : IAsyncLifetime
