@@ -52,16 +52,13 @@ public class UserTenants(ProvisioningDbContext db, HttpClient userService, ILogg
 public static class UserTenantsExtensions
 {
     /// <summary>
-    /// <c>UserService:Url</c>, by default the host of <c>Auth:MetadataAddress</c> (UserService's discovery document, which
-    /// is cluster-internal too).
+    /// <c>UserService:Url</c>: UserService's cluster-internal address (for <c>internal/users/{id}/tenant</c>).
     /// </summary>
     public static IServiceCollection AddUserTenants(this IServiceCollection services, IConfiguration configuration)
     {
         var url = configuration["UserService:Url"] is { Length: > 0 } configured
             ? configured
-            : configuration["Auth:MetadataAddress"] is { Length: > 0 } metadata
-                ? new Uri(metadata).GetLeftPart(UriPartial.Authority)
-                : throw new InvalidOperationException("'UserService:Url' (or 'Auth:MetadataAddress') is not configured.");
+            : throw new InvalidOperationException("'UserService:Url' is not configured.");
 
         services.AddHttpClient<UserTenants>(client =>
         {
