@@ -20,7 +20,7 @@ builder.Services.AddProvisioningPersistence(builder.Configuration);
 builder.Services.AddJwtAuth(builder.Configuration);
 builder.Services.AddApiDocs("ProvisioningService API");
 builder.Services.AddServiceHealthChecks<ProvisioningDbContext>();
-builder.Services.AddObservability("provisioning-service");
+builder.Services.AddObservability("provisioning-service", builder.Configuration);
 builder.Services.ConfigureHttpJsonOptions(o => o.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 
 builder.Services.AddGrpcClient<Payment.PaymentClient>(o =>
